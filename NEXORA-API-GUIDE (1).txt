@@ -1,0 +1,201 @@
+====================================================================
+NEXORA — AI + VOICE (TTS) API INTEGRATION GUIDE
+(Plain-text version. Directly copy-paste in any AI tool / codebase
+to implement NEXORA AI & Voice in your own app.)
+====================================================================
+
+BASE URL
+  https://nexora-navy-omega.vercel.app
+
+---------------------------------------------------------------
+1) AUTH — LOGIN KARKE TOKEN LO (sabse IMPORTANT)
+---------------------------------------------------------------
+HAR user ko ek TOKEN milta hai login karne par. Wahi token har API
+call me "Authorization: Bearer <token>" bhejna hota hai.
+
+NOTE — SITE ID: Agar admin ne user ke account pe "sites / origin IDs"
+set kiya hai to login request me SITE ID bhi bhejna zaroori hai,
+warna "401 Invalid username or password for this site" aayega.
+Site ID wo origin ID hai jo admin auth panel me user pe set karta hai
+(blank/universal accounts ko site id nahi chahiye).
+
+  POST https://nexora-navy-omega.vercel.app/api/auth-login
+  Content-Type: application/json
+
+  Body (universal account - binna siteId):
+  {
+    "username": "USERNAME",
+    "password": "PASSWORD",
+    "hwid": "DEVICE_ID"            // device id, koi bhi string
+  }
+
+  Body (site-bound account - siteId BHEJNA ZAROORI):
+  {
+    "username": "USERNAME",
+    "password": "PASSWORD",
+    "hwid": "DEVICE_ID",
+    "siteId": "ADMIN_WALI_ORIGIN_ID"   // account ka origin ID
+  }
+
+  Site-bound account aur siteId match nahi hua:
+  401 "Invalid username or password for this site"
+
+  Success (200) -> lens:
+  {
+    "ok": true,
+    "user": { "username": "...", "expiresAt": 1730000000000 },
+    "token": "eyJhbGciOi..."
+  }
+
+  => TOKEN include karo har server request me:
+     Authorization: Bearer <TOKEN>
+
+  Login error 200 par bhi aata hai! Check "ok": false:
+  {
+    "ok": false,
+    "error": "INVALID_CREDENTIALS",  // galat user/pass
+    "message": "Wrong username or password."
+  }
+
+  Important: Token expiry (expiresAt) ke baad 401 aayega —
+  phir se login karke naya token lo.
+
+---------------------------------------------------------------
+2) AI CHAT — POST /api/ai   (NVIDIA NIM models)
+---------------------------------------------------------------
+  POST https://nexora-navy-omega.vercel.app/api/ai
+  Content-Type: application/json
+  Authorization: Bearer <TOKEN>
+
+  Body:
+  {
+    "model": "nvidia/nemotron-3-ultra-550b-a55b",
+    "systemPrompt": "You are a smart assistant.",
+    "userPrompt": "How to cook pasta?",
+    "thinking": false,          // true = reasoning chain bhi milega
+    "temperature": 1,
+    "max_tokens": 16384,
+    "format": "json"            // json (default) ya stream (SSE)
+  }
+
+  Response (200, json):
+  {
+    "ok": true,
+    "model": "nvidia/nemotron-3-ultra-550b-a55b",
+    "thinking": false,
+    "reasoning": "",            // sirf thinking=true pe bhar jata hai
+    "content": "Here is the pasta recipe...",   // <-- yeh dikhao
+    "finishReason": "stop"
+  }
+
+  Request fields:
+    model         string, optional, default nvidia/nemotron-3-ultra-550b-a55b
+    systemPrompt  string, optional, max 4000 chars
+    userPrompt    string, REQUIRED, max 20000 chars
+    thinking      bool, optional
+    temperature   number 0..2, default 1
+    top_p         number 0..1, default 0.95
+    max_tokens    number 1..16384, default 16384
+    format        "json" | "stream" (SSE)
+
+  SSE STREAMING (format:"stream"):
+    Line-based SSE:
+      data: {"delta":"Hello"}
+      data: {"delta":" "}
+      data: {"delta":"world"}
+      ...end ke sath:
+      data: {"end":true,"finishReason":"stop"}
+    Har "delta" chunk ko append karo -> live typing effect.
+
+---------------------------------------------------------------
+3) AVAILABLE MODELS (public, no auth) — GET /api/ai-models/public
+---------------------------------------------------------------
+  GET https://nexora-navy-omega.vercel.app/api/ai-models/public
+
+  -> enabled models ki list + "api":"NEXORA /api/ai".
+  Sahi "model" id yahan se leke /api/ai me daalna.
+
+---------------------------------------------------------------
+4) VOICE / TEXT-TO-SPEECH (TTS) — NVIDIA Magpie
+---------------------------------------------------------------
+Text -> realistic WAV audio. Greetings, notifications,
+kahani, audio-response apps.
+
+4a) Voices list (PUBLIC, no auth)
+  GET https://nexora-navy-omega.vercel.app/api/voices
+
+  Response:
+  {
+    "ok": true,
+    "model": "Magpie-Multilingual (NVIDIA)",
+    "total": 86,
+    "languages": {
+      "en-US": { "language": "en-US",
+                 "voices": ["Magpie-Multilingual.EN-US.Aria", ...] },
+      "hi-IN": { "language": "hi-IN", "voices": [...] }
+    }
+  }
+
+  Note: language camelCase hai (en-US, hi-IN, en-GB). Language
+  field exact "xx-XX" format me bhejo.
+
+4b) Synthesize speech — POST /api/tts  (AUTH — Bearer token)
+  POST https://nexora-navy-omega.vercel.app/api/tts
+  Content-Type: application/json
+  Authorization: Bearer <TOKEN>
+
+  Body:
+  {
+    "text": "Hello! Welcome to NEXORA.",
+    "language": "en-US",
+    "voice": "Magpie-Multilingual.EN-US.Aria",
+    "sampleRate": 44100      // 8000..48000, default 44100
+  }
+
+  text      string, REQUIRED, max 2000 chars
+  language  string, optional, default en-US
+  voice     string, optional, default Magpie-Multilingual.EN-US.Aria
+            (voices list se pick karo)
+
+  Response -> 200 + audio/wav (LINEAR_PCM) bytes.
+  Output hamesha WAV hai (is model pe MP3/OGG support nahi).
+  File me likho (.wav) ya player me bajaao.
+
+  App pattern:
+  login (token) -> GET /api/voices -> pick voice
+                -> POST /api/tts {text, voice} -> play audio
+
+---------------------------------------------------------------
+5) ERROR CODES
+---------------------------------------------------------------
+  400  Bad request (kuch required missing / galat format)
+  401  Missing/Bad token  -> user ko phir se login karwao
+  401  "Invalid username or password for this site"
+       -> account pe site binding hai; login me sahi `siteId`
+          (admin-wala origin ID) bhejo
+  403  Feature admin ne band kiya hai (e.g. TTS off)
+  429  Rate limit hit (default 20/min per user+IP) -> wait, retry
+  502  NVIDIA upstream error -> 3-5s wait, retry 2-3 baar
+
+  Retry logic: empty result / network fail pe 2-3 retry (1s, 2s, 4s).
+
+---------------------------------------------------------------
+6) QUICK START (60 second)
+---------------------------------------------------------------
+  1. POST /api/auth-login (username + password + hwid
+     + siteId AGAR account site-bound hai) 
+     -> save token
+  2. POST /api/ai (Bearer token + userPrompt) -> show "content"
+  3. Optional: thinking:true for reasoning,
+     format:stream for live typing
+  4. Voice: GET /api/voices -> pick voice ->
+     POST /api/tts -> audio play
+  5. Handle 401 (re-login / galat siteId), 429 (wait), 502 (retry)
+
+  NOTE: NVIDIA key kabhi app ke paas nahi jaati — sab server pe hai.
+  App sirf token bhejta hai. Yehi flow har NEXORA Auth user ke liye
+  chalega: login -> token -> Bearer token se har API call.
+
+====================================================================
+END OF GUIDE
+====================================================================
