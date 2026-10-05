@@ -4,7 +4,7 @@ Daily Reminder helps you finish tasks, not just remember them. Create habits lik
 
 ## Demo login (public)
 
-The app uses Nexora auth (`siteId: remindernexora`).
+The app uses Nexora auth.
 
 - Username: `NEXORA`
 - Password: `FREE`
